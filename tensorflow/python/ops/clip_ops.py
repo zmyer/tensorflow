@@ -26,9 +26,10 @@ from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import gen_array_ops
+from tensorflow.python.ops import gen_math_ops
+from tensorflow.python.ops import gen_nn_ops
 from tensorflow.python.ops import math_ops
-from tensorflow.python.ops import nn_ops
-
 
 def clip_by_value(t, clip_value_min, clip_value_max,
                   name=None):
@@ -41,22 +42,50 @@ def clip_by_value(t, clip_value_min, clip_value_max,
 
   Args:
     t: A `Tensor`.
-    clip_value_min: A 0-D (scalar) `Tensor`. The minimum value to clip by.
-    clip_value_max: A 0-D (scalar) `Tensor`. The maximum value to clip by.
+    clip_value_min: A 0-D (scalar) `Tensor`, or a `Tensor` with the same shape
+      as `t`. The minimum value to clip by.
+    clip_value_max: A 0-D (scalar) `Tensor`, or a `Tensor` with the same shape
+      as `t`. The maximum value to clip by.
     name: A name for the operation (optional).
 
   Returns:
     A clipped `Tensor`.
+
+  Raises:
+    ValueError: if the clip tensors would trigger array broadcasting
+      that would make the returned tensor larger than the input.
   """
   with ops.name_scope(name, "clip_by_value",
                       [t, clip_value_min, clip_value_max]) as name:
-    t = ops.convert_to_tensor(t, name="t")
+    return gen_math_ops._clip_by_value(t,
+                                       clip_value_min,
+                                       clip_value_max,
+                                       name=name)
 
-    # Go through list of tensors, for each value in each tensor clip
-    t_min = math_ops.minimum(t, clip_value_max)
-    t_max = math_ops.maximum(t_min, clip_value_min, name=name)
 
-  return t_max
+@ops.RegisterGradient("ClipByValue")
+def _ClipByValueGrad(op, grad):
+  """Returns grad of clip_by_value."""
+  x = op.inputs[0]
+  y = op.inputs[1]
+  z = op.inputs[2]
+  gdtype = grad.dtype
+  sx = array_ops.shape(x)
+  sy = array_ops.shape(y)
+  sz = array_ops.shape(z)
+  gradshape = array_ops.shape(grad)
+  zeros = array_ops.zeros(gradshape, gdtype)
+  xymask = math_ops.less(x, y)
+  xzmask = math_ops.greater(x, z)
+  rx, ry = gen_array_ops._broadcast_gradient_args(sx, sy)
+  rx, rz = gen_array_ops._broadcast_gradient_args(sx, sz)
+  xgrad = array_ops.where(math_ops.logical_or(xymask, xzmask), zeros, grad)
+  ygrad = array_ops.where(xymask, grad, zeros)
+  zgrad = array_ops.where(xzmask, grad, zeros)
+  gx = array_ops.reshape(math_ops.reduce_sum(xgrad, rx), sx)
+  gy = array_ops.reshape(math_ops.reduce_sum(ygrad, ry), sy)
+  gz = array_ops.reshape(math_ops.reduce_sum(zgrad, rz), sz)
+  return (gx, gy, gz)
 
 
 def clip_by_norm(t, clip_norm, axes=None, name=None):
@@ -96,11 +125,13 @@ def clip_by_norm(t, clip_norm, axes=None, name=None):
     t = ops.convert_to_tensor(t, name="t")
 
     # Calculate L2-norm, clip elements by ratio of clip_norm to L2-norm
-    l2norm_inv = math_ops.rsqrt(
-        math_ops.reduce_sum(t * t, axes, keep_dims=True))
-    tclip = array_ops.identity(t * clip_norm * math_ops.minimum(
-        l2norm_inv, constant_op.constant(1.0, dtype=t.dtype) / clip_norm),
-                               name=name)
+    l2norm = math_ops.sqrt(math_ops.reduce_sum(t * t, axes, keep_dims=True))
+    intermediate = t * clip_norm
+    # Assert that the shape is compatible with the initial shape,
+    # to prevent unintentional broadcasting.
+    _ = t.shape.merge_with(intermediate.shape)
+    tclip = array_ops.identity(
+        intermediate / math_ops.maximum(l2norm, clip_norm), name=name)
 
   return tclip
 
@@ -140,9 +171,9 @@ def global_norm(t_list, name=None):
     for v in values:
       if v is not None:
         with ops.colocate_with(v):
-          half_squared_norms.append(nn_ops.l2_loss(v))
+          half_squared_norms.append(gen_nn_ops.l2_loss(v))
 
-    half_squared_norm = math_ops.reduce_sum(array_ops.pack(half_squared_norms))
+    half_squared_norm = math_ops.reduce_sum(array_ops.stack(half_squared_norms))
 
     norm = math_ops.sqrt(
         half_squared_norm *

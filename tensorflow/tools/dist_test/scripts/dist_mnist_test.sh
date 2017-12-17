@@ -43,7 +43,7 @@
 # NOTES:
 # If you have the error "$'\r': command not found"
 # Please run the command below to remove trailing '\r' character that causes the error:
-#   sed -i 's/\r$//' dist_mnist_test.sh 
+#   sed -i 's/\r$//' dist_mnist_test.sh
 
 
 # Configurations
@@ -67,29 +67,36 @@ EXISTING_SERVERS=False
 
 while true; do
   if [[ "$1" == "--ps_hosts" ]]; then
-  	PS_HOSTS=$2
+    PS_HOSTS=$2
+    shift 2
   elif [[ "$1" == "--worker_hosts" ]]; then
     WORKER_HOSTS=$2
+    shift 2
   elif [[ "$1" == "--existing_servers" ]]; then
     EXISTING_SERVERS=$2
+    shift 2
     if [[ "${EXISTING_SERVERS}" != "True" ]] && \
        [[ "${EXISTING_SERVERS}" != "False" ]]; then
       die "Invalid value for --existing_servers: should be (True|False)"
     fi
   elif [[ "$1" == "--num_gpus" ]]; then
     N_GPUS=$2
+    shift 2
   elif [[ "$1" == "--sync_replicas" ]]; then
     SYNC_REPLICAS="1"
-    die "ERROR: --sync_replicas (synchronized-replicas) mode is not fully "\
-"supported by this test yet."
-    # TODO(cais): Remove error message once sync_replicas is fully supported.
+    shift 1
   fi
-  shift 2
 
   if [[ -z "$1" ]]; then
     break
   fi
 done
+
+if [[ ${SYNC_REPLICAS} == "1" ]] && [[ EXISTING_SERVERS == "1" ]]; then
+  die "ERROR: --sync_replicas (synchronized-replicas) mode is not fully "\
+"supported under the --existing_servers mode yet."
+  # TODO(cais): Remove error message once sync_replicas is fully supported.
+fi
 
 SYNC_REPLICAS_FLAG=""
 if [[ ${SYNC_REPLICAS} == "1" ]]; then
@@ -133,7 +140,7 @@ timeout ${TIMEOUT} python "${MNIST_REPLICA}" \
 # Get N_PS by PS_HOSTS
 N_PS=$(echo ${PS_HOSTS} | awk -F "," '{printf NF}')
 # Replace the delimiter with " "
-PS_ARRAY=$(echo ${PS_HOSTS} | awk -F "," '{for(i=1;i<=NF;i++){printf $i" "}}')
+PS_ARRAY=($(echo ${PS_HOSTS} | awk -F "," '{for(i=1;i<=NF;i++){printf $i" "}}'))
 # Run a number of ps in parallel. In general, we only set 1 ps.
 echo "${N_PS} ps process(es) running in parallel..."
 
@@ -150,7 +157,7 @@ if [[ ${EXISTING_SERVERS} == "False" ]]; then
         --job_name="ps" \
         --task_index=${IDX} \
         --num_gpus=${N_GPUS} \
-        --sync_replicas=${SYNC_REPLICAS_FLAG} | tee "${PS_LOG_PREFIX}${IDX}.log" &
+        --sync_replicas=${SYNC_REPLICAS_FLAG} 2>&1 | tee "${PS_LOG_PREFIX}${IDX}.log" &
     echo "PS ${IDX}: "
     echo "  PS HOST: ${PS_ARRAY[IDX]}"
     echo "  log file: ${PS_LOG_PREFIX}${IDX}.log"
@@ -166,7 +173,7 @@ fi
 # Get N_WORKERS by WORKER_HOSTS
 N_WORKERS=$(echo ${WORKER_HOSTS} | awk -F "," '{printf NF}')
 # Replace the delimiter with " "
-WORKER_ARRAY=$(echo ${WORKER_HOSTS} | awk -F "," '{for(i=1;i<=NF;i++){printf $i" "}}')
+WORKER_ARRAY=($(echo ${WORKER_HOSTS} | awk -F "," '{for(i=1;i<=NF;i++){printf $i" "}}'))
 # Run a number of workers in parallel
 echo "${N_WORKERS} worker process(es) running in parallel..."
 
@@ -181,7 +188,7 @@ while true; do
       --task_index=${IDX} \
       --num_gpus=${N_GPUS} \
       --train_steps=500 \
-      --sync_replicas=${SYNC_REPLICAS_FLAG} | tee "${WKR_LOG_PREFIX}${IDX}.log" &
+      --sync_replicas=${SYNC_REPLICAS_FLAG} 2>&1 | tee "${WKR_LOG_PREFIX}${IDX}.log" &
   echo "Worker ${IDX}: "
   echo "  WORKER HOST: ${WORKER_ARRAY[IDX]}"
   echo "  log file: ${WKR_LOG_PREFIX}${IDX}.log"

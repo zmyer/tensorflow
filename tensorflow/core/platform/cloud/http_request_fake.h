@@ -24,7 +24,7 @@ limitations under the License.
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
-#include "tensorflow/core/platform/cloud/http_request.h"
+#include "tensorflow/core/platform/cloud/curl_http_request.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/protobuf.h"
 #include "tensorflow/core/platform/test.h"
@@ -33,11 +33,12 @@ limitations under the License.
 namespace tensorflow {
 
 /// Fake HttpRequest for testing.
-class FakeHttpRequest : public HttpRequest {
+class FakeHttpRequest : public CurlHttpRequest {
  public:
   /// Return the response for the given request.
   FakeHttpRequest(const string& request, const string& response)
-      : FakeHttpRequest(request, response, Status::OK(), nullptr, {}, 200) {}
+      : FakeHttpRequest(request, response, Status::OK(), nullptr, {}, 200) {
+  }
 
   /// Return the response with headers for the given request.
   FakeHttpRequest(const string& request, const string& response,
@@ -76,7 +77,7 @@ class FakeHttpRequest : public HttpRequest {
 
   Status Init() override { return Status::OK(); }
   Status SetUri(const string& uri) override {
-    actual_request_ += "Uri: " + uri + "\n";
+    actual_uri_ += "Uri: " + uri + "\n";
     return Status::OK();
   }
   Status SetRange(uint64 start, uint64 end) override {
@@ -124,19 +125,17 @@ class FakeHttpRequest : public HttpRequest {
     }
     return Status::OK();
   }
-  Status SetResultBuffer(char* scratch, size_t size,
-                         StringPiece* result) override {
-    scratch_ = scratch;
-    size_ = size;
-    result_ = result;
+  Status SetResultBuffer(std::vector<char>* buffer) override {
+    buffer->clear();
+    buffer_ = buffer;
     return Status::OK();
   }
   Status Send() override {
-    EXPECT_EQ(expected_request_, actual_request_) << "Unexpected HTTP request.";
-    if (scratch_ && result_) {
-      auto actual_size = std::min(response_.size(), size_);
-      memcpy(scratch_, response_.c_str(), actual_size);
-      *result_ = StringPiece(scratch_, actual_size);
+    EXPECT_EQ(expected_request_, actual_request())
+        << "Unexpected HTTP request.";
+    if (buffer_) {
+      buffer_->insert(buffer_->begin(), response_.c_str(),
+                      response_.c_str() + response_.size());
     }
     return response_status_;
   }
@@ -163,11 +162,24 @@ class FakeHttpRequest : public HttpRequest {
 
   virtual uint64 GetResponseCode() const override { return response_code_; }
 
+  Status SetTimeouts(uint32 connection, uint32 inactivity,
+                     uint32 total) override {
+    actual_request_ += strings::StrCat("Timeouts: ", connection, " ",
+                                       inactivity, " ", total, "\n");
+    return Status::OK();
+  }
+
  private:
-  char* scratch_ = nullptr;
-  size_t size_ = 0;
-  StringPiece* result_ = nullptr;
+  string actual_request() const {
+    string s;
+    s.append(actual_uri_);
+    s.append(actual_request_);
+    return s;
+  }
+
+  std::vector<char>* buffer_ = nullptr;
   string expected_request_;
+  string actual_uri_;
   string actual_request_;
   string response_;
   Status response_status_;

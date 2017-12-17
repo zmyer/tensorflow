@@ -16,21 +16,16 @@ limitations under the License.
 #ifndef TENSORFLOW_LIB_IO_ZLIB_INPUTSTREAM_H_
 #define TENSORFLOW_LIB_IO_ZLIB_INPUTSTREAM_H_
 
+#include <zlib.h>
+
 #include <string>
+
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/lib/io/inputstream_interface.h"
 #include "tensorflow/core/lib/io/zlib_compression_options.h"
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/macros.h"
 #include "tensorflow/core/platform/types.h"
-
-// TODO(srbs|vrv): Move to a platform/zlib.h file to centralize all
-// platform-specific includes
-#ifdef __ANDROID__
-#include "zlib.h"
-#else
-#include <zlib.h>
-#endif  // __ANDROID__
 
 namespace tensorflow {
 namespace io {
@@ -42,7 +37,7 @@ namespace io {
 // by multiple threads
 class ZlibInputStream : public InputStreamInterface {
  public:
-  // Create a ZlibInputBuffer for `input_stream` with a buffer of size
+  // Create a ZlibInputStream for `input_stream` with a buffer of size
   // `input_buffer_bytes` bytes for reading contents from `input_stream` and
   // another buffer with size `output_buffer_bytes` for caching decompressed
   // contents. Does *not* take ownership of "input_stream".
@@ -65,7 +60,11 @@ class ZlibInputStream : public InputStreamInterface {
 
   int64 Tell() const override;
 
+  Status Reset() override;
+
  private:
+  void InitZlibBuffer();
+
   InputStreamInterface* input_stream_;  // Not owned
   size_t input_buffer_capacity_;        // Size of z_stream_input_
   size_t output_buffer_capacity_;       // Size of z_stream_output_
@@ -132,6 +131,9 @@ class ZlibInputStream : public InputStreamInterface {
   //
   // Returns the size of [next_unread_byte_, z_stream_->next_out)
   size_t NumUnreadBytes() const;
+
+  // Number of *uncompressed* bytes that have been read from this stream.
+  int64 bytes_read_;
 
   TF_DISALLOW_COPY_AND_ASSIGN(ZlibInputStream);
 };

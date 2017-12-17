@@ -47,6 +47,17 @@ class BufferedInputStream : public InputStreamInterface {
 
   int64 Tell() const override;
 
+  // Seek to this offset within the file.
+  //
+  // If we seek to somewhere within our pre-buffered data, we will re-use what
+  // data we can.  Otherwise, Seek() throws out the current buffer and the next
+  // read will trigger an underlying read.
+  //
+  // Note: When seeking backwards in a stream, this implementation uses
+  // Reset() + SkipNBytes(), so its performance will be dependent
+  // largely on the performance of SkipNBytes().
+  Status Seek(int64 position);
+
   // Read one text line of data into "*result" until end-of-file or a
   // \n is read.  (The \n is not included in the result.)  Overwrites
   // any existing data in *result.
@@ -64,6 +75,14 @@ class BufferedInputStream : public InputStreamInterface {
   // no special treatment.
   string ReadLineAsString();
 
+  // Reads the entire contents of the file into *result.
+  //
+  // Note: the amount of memory used by this function call is unbounded, so only
+  // use in ops that expect that behavior.
+  Status ReadAll(string* result);
+
+  Status Reset() override;
+
  private:
   Status FillBuffer();
   Status ReadLineHelper(string* result, bool include_eol);
@@ -75,6 +94,9 @@ class BufferedInputStream : public InputStreamInterface {
   size_t pos_ = 0;    // current position in buf_.
   size_t limit_ = 0;  // just past the end of valid data in buf_.
   bool owns_input_stream_ = false;
+  // When EoF is reached, file_status_ contains the status to skip unnecessary
+  // buffer allocations.
+  Status file_status_ = Status::OK();
 
   TF_DISALLOW_COPY_AND_ASSIGN(BufferedInputStream);
 };

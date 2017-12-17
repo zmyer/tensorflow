@@ -106,6 +106,10 @@ limitations under the License.
   $1 = &temp;
 }
 
+%typemap(out) int64_t {
+  $result = PyLong_FromLongLong($1);
+}
+
 %typemap(out) string {
   $result = PyBytes_FromStringAndSize($1.data(), $1.size());
 }
@@ -193,6 +197,21 @@ _LIST_OUTPUT_TYPEMAP(unsigned int, PyLong_FromUnsignedLong);
 _COPY_TYPEMAPS(unsigned long long, uint64);
 _COPY_TYPEMAPS(long long, int64);
 _COPY_TYPEMAPS(unsigned int, mode_t);
+
+// Proto input arguments to C API functions are passed as a (const
+// void*, size_t) pair. In Python, typemap these to a single string
+// argument.  This typemap does *not* make a copy of the input.
+%typemap(in) (const void* proto, size_t proto_len) {
+  char* c_string;
+  Py_ssize_t py_size;
+  // PyBytes_AsStringAndSize() does not copy but simply interprets the input
+  if (PyBytes_AsStringAndSize($input, &c_string, &py_size) == -1) {
+    // Python has raised an error (likely TypeError or UnicodeEncodeError).
+    SWIG_fail;
+  }
+  $1 = static_cast<void*>(c_string);
+  $2 = static_cast<size_t>(py_size);
+}
 
 // SWIG macros for explicit API declaration.
 // Usage:
